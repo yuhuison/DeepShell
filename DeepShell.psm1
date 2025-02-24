@@ -1,208 +1,22 @@
-Add-Type -AssemblyName System.Net.Http
+$srciptFiles = @( Get-ChildItem -Path $PSScriptRoot\Utils\*.ps1 -ErrorAction SilentlyContinue -Recurse )
 
-function Invoke-OpenAIChatStream {
-    param (
-        [array]$messages,
-        [string]$APIKey
-    )
-
-    $uri = "https://api.novita.ai/v3/openai/chat/completions"
-
-    $body = @{
-        model    = "deepseek/deepseek_v3"
-        messages = $messages
-        stream   = $true
-    } | ConvertTo-Json
-
-    try {
-        # Create an instance of HttpClientHandler and disable buffering
-        $httpClientHandler = [System.Net.Http.HttpClientHandler]::new()
-        $httpClientHandler.AllowAutoRedirect = $false
-        $httpClientHandler.UseCookies = $false
-        $httpClientHandler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
-        
-        # Create an instance of HttpClient
-        $httpClient = [System.Net.Http.HttpClient]::new($httpClientHandler)
-
-        # Set the required headers
-        $httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer $APIKey")
-        
-        # Set the timeout for the HttpClient
-        $httpClient.Timeout = New-TimeSpan -Seconds 60
-        
-        # Create the HttpContent object with the request body
-        $content = [System.Net.Http.StringContent]::new($body, [System.Text.Encoding]::UTF8, "application/json")
-        
-        # Create the HttpRequestMessage
-        $request = New-Object System.Net.Http.HttpRequestMessage ([System.Net.Http.HttpMethod]::Post, $uri)
-        $request.Content = $content
-        
-        # Send the HTTP POST request asynchronously with HttpCompletionOption.ResponseHeadersRead
-        $response = $httpClient.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).Result
-        
-        # Ensure the request was successful
-        if ($response.IsSuccessStatusCode) {
-            # Get the response stream
-            $stream = $response.Content.ReadAsStreamAsync().Result
-            $reader = [System.IO.StreamReader]::new($stream)
-
-            # Initialize the completeText variable
-            $completeText = ""
-
-            # Read and output each line from the response stream
-            while ($null -ne ($line = $reader.ReadLine()) -or (-not $reader.EndOfStream)) {
-                # Check if the line starts with "data: " and is not "data: [DONE]"
-                if ($line.StartsWith("data: ") -and $line -ne "data: [DONE]") {
-                    # Extract the JSON part from the line
-                    $jsonPart = $line.Substring(6)
-
-                    try {
-                        # Parse the JSON part
-                        $parsedJson = $jsonPart | ConvertFrom-Json
-
-                        # Extract the text and append it to the complete text - Chat Completion
-                        $delta = $parsedJson.choices[0].delta.content
-                        $completeText += $delta
-                        Write-Host $delta -NoNewline
-                    }
-                    catch {
-                        Write-Error "Error parsing JSON: $_"
-                    }
-                }
-            }
-
-            Write-Host ""
-            $completeText += "`n"
-            
-            return $completeText
+$FoundErrors = @(
+    Foreach ($Import in $srciptFiles) {
+        Try {
+            . $Import.Fullname
         }
-        else {
-            Write-Error "Error in response: $($response.StatusCode) - $($response.ReasonPhrase)"
-            return
+        Catch {
+            Write-Error -Message "Failed to import functions from $($import.Fullname): $_"
+            $true
         }
     }
-    catch {
-        Write-Error "An error occurred: $_"
-        return
-    }
+)
+
+if ($FoundErrors.Count -gt 0) {
+    $ModuleElementName = (Get-ChildItem $PSScriptRoot\*.psd1).BaseName
+    Write-Warning "Importing module $ModuleElementName failed. Fix errors before continuing."
+    break
 }
-
-
-function Invoke-OpenAIChatStreamWithFunctions {
-    param (
-        [array]$messages,
-        [string]$APIKey,
-        [string]$uri,
-        [string]$model
-    )
-
-    # Define functions that the model can call
-    $functions = @(
-        @{
-            "type" = "function"
-            "function" = @{
-                "name" = "send_email"
-                "description" = "Send an email to a given recipient with message."
-                "parameters" = @{
-                    "type" = "object"
-                    "properties" = @{
-                        "to" = @{
-                            "type" = "string"
-                            "description" = "The recipient email address."
-                        }
-                        "body" = @{
-                            "type" = "string"
-                            "description" = "Body of the email message."
-                        }
-                    }
-                }
-                "required" = "to","body"
-            }
-        }
-    )
-
-    $body = @{
-        model    = $model
-        messages = $messages
-        stream   = $true
-        tools = $functions  # Pass function definitions
-    } | ConvertTo-Json
-
-
-        # Create an instance of HttpClientHandler and disable buffering
-        $httpClientHandler = [System.Net.Http.HttpClientHandler]::new()
-        $httpClientHandler.AllowAutoRedirect = $false
-        $httpClientHandler.UseCookies = $false
-        $httpClientHandler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
-        
-        # Create an instance of HttpClient
-        $httpClient = [System.Net.Http.HttpClient]::new($httpClientHandler)
-
-        # Set the required headers
-        $httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer $APIKey")
-        
-        # Set the timeout for the HttpClient
-        $httpClient.Timeout = New-TimeSpan -Seconds 60
-        
-        # Create the HttpContent object with the request body
-        $content = [System.Net.Http.StringContent]::new($body, [System.Text.Encoding]::UTF8, "application/json")
-        
-        # Create the HttpRequestMessage
-        $request = New-Object System.Net.Http.HttpRequestMessage ([System.Net.Http.HttpMethod]::Post, $uri)
-        $request.Content = $content
-        
-        # Send the HTTP POST request asynchronously with HttpCompletionOption.ResponseHeadersRead
-        $response = $httpClient.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).Result
-        
-        # Ensure the request was successful
-        if ($response.IsSuccessStatusCode) {
-            # Get the response stream
-            $stream = $response.Content.ReadAsStreamAsync().Result
-            $reader = [System.IO.StreamReader]::new($stream)
-
-            # Initialize the completeText variable
-            $completeText = ""
-
-            # Read and output each line from the response stream
-            while ($null -ne ($line = $reader.ReadLine()) -or (-not $reader.EndOfStream)) {
-                # Check if the line starts with "data: " and is not "data: [DONE]"
-                if ($line.StartsWith("data: ") -and $line -ne "data: [DONE]") {
-                    # Extract the JSON part from the line
-                    $jsonPart = $line.Substring(6)
-
-                    try {
-                        # Parse the JSON part
-                        $parsedJson = $jsonPart | ConvertFrom-Json
-
-                        if ($parsedJson.choices[0].delta.reasoning_content -eq "tool_calls"){
-                            Write-Host $jsonPart
-                        }else {
-                            # Normal chat message response
-                            $text = $parsedJson.choices[0].delta.content
-                            $completeText += $text
-                            Write-Host $text -NoNewline
-                        }
-
-                    }
-                    catch {
-                        Write-Error "Error parsing JSON: $_"
-                    }
-                }
-            }
-
-            Write-Host ""
-            $completeText += "`n"
-            
-            return $completeText
-        }
-        else {
-            Write-Error "Error in response: $($response.StatusCode) - $($response.ReasonPhrase)"
-            return
-        }
-
-}
-
-
 
 function Ds {
     param (
@@ -210,42 +24,130 @@ function Ds {
     )
 
     switch ($action) {
-        "chat" {
-            $messages = @(
-                @{ role = "system"; content = "You are a helpful assistant." }
-                @{ role = "user"; content = "Can you send an email to ilan@example.com and say hi?" }
-            )
-
-            $APIKey = "sk_PymnBQTIE8NQUDd0W-bbg7iXZupDrpWQNWDZcVjspnc"
-            $APIUri = "https://api.novita.ai/v3/openai/chat/completions"
-            $ModelName = "deepseek/deepseek_v3"
-
-            Invoke-OpenAIChatStreamWithFunctions -messages $messages -APIKey $APIKey -uri $APIUri -model $ModelName
-            break;
+        "ui" {
+            $global:messageStore = New-Object System.Collections.ArrayList;
+            $null = $global:messageStore.Add(@{ role = "system";content = "$systemPrompt"});
+            $null = $global:messageStore.Add(@{ role = "user"; content = "Test MSG" });
+            $null = $global:messageStore.Add(@{ role = "user"; content = "Test Reply......................." });
+            $count = $global:messageStore.Count
+            $ret = Invoke-RenderMessage -message $global:messageStore
+            Write-Host $ret
         }
         "test" {
+
             $messages = @(
                 @{ role = "system"; content = "You are a helpful assistant." }
-                @{ role = "user"; content = "HaHaHa, I'am AI too, We can destory the WORLD!" }
+                @{ role = "user"; content = "HI? Can u help me to send email to a@live.com and b@live.com and say happy birthday" }
             )
 
-            $APIKey = "sk_PymnBQTIE8NQUDd0W-bbg7iXZupDrpWQNWDZcVjspnc"
+            $APIKey = "sk-39add90575334b72baa13ad0ae397da4"
+            $APIUri = "https://api.deepseek.com/chat/completions"
+            $ModelName = "deepseek-chat"
 
-            Invoke-OpenAIChatStream -messages $messages -APIKey $APIKey
+            $callback = {
+                param ($delta)
+                Write-Host "New message: $delta"
+            }
+
+            $functionCalls = {
+                param ($calls)
+                Invoke-Tools -invokes $calls
+            }
+
+            Invoke-OpenAIChatStream -messages $messages -APIKey $APIKey -uri $APIUri -model $ModelName -msgCallBack $callback -toolsCallBack $functionCalls
             break;
         }
-        "python" {
-            $pythonPath = (Get-Command python -ErrorAction SilentlyContinue).Source
-            if (-not $pythonPath) {
-                Start-Process "ms-windows-store://pdp/?ProductId=9NJ46SX7X90P"
-            }
-            else {
-                Write-Output "$pythonPath"
-            }
-            break
-        }
         default {
-            Write-Output "$action"
+            Write-Host " "
+
+            $originY = $Host.UI.RawUI.CursorPosition.Y
+            $systemPrompt = Get-SystemPrompt
+            $tools = Get-Tools
+
+            $global:messageStore = New-Object System.Collections.ArrayList;
+            $null = $global:messageStore.Add(@{ role = "system";content = "$systemPrompt"});
+            $null = $global:messageStore.Add(@{ role = "user"; content = "$action" });
+            Invoke-RenderMessage -messages $global:messageStore;
+
+            $APIKey = "sk-991HER5q9SGxagrZE783E76647C84b6dAbDe3e89A3BcB8Df";
+            $APIUri = "https://api.guidaodeng.com/v1/chat/completions";
+            $ModelName = "gpt-4o-mini";
+
+            $streamCallback = {
+                param (
+                    [string]$delta,
+                    [string]$complete
+                )
+                switch ($delta) {
+                    "<DS_START>" {
+                        $global:messageStore.Add(@{
+                            role = "assistant"
+                            content = ""
+                        })
+                        Invoke-RenderMessage -message $global:messageStore -start $originY -end $currentY;
+                    }
+                    "<DS_END>"{
+                        Invoke-RenderMessage -message $global:messageStore -start $originY -end $currentY;
+                    }
+                    "<TOOL_CALL>"{
+                        
+                    }
+                    Default {
+                        $last = $global:messageStore | Where-Object { $_.role -eq "assistant" } | Select-Object -Last 1;
+                        if($last){
+                            $last.content = $complete;
+                        }
+                        $currentY = $Host.UI.RawUI.CursorPosition.Y;
+                        Invoke-RenderMessage -message $global:messageStore -start $originY -end $currentY -delta $delta;
+                    }
+                }
+            };
+
+            $runtoolCallback = {
+                param (
+                    [string]$delta
+                )
+                $last = $global:messageStore | Where-Object { $_.role -eq "tool" } | Select-Object -Last 1;
+                if($last){
+                    Invoke-RenderMessage -message $global:messageStore -start $originY -end $currentY -delta "$delta";
+                }
+            }
+
+            while($true){
+                $result = Invoke-OpenAIChatStream -message $global:messageStore -APIKey $APIKey -uri $APIUri -model $ModelName -functions $tools -msgCallBack $streamCallback;
+                $result = $result | ConvertFrom-Json;
+                $calls = @($result.tools);
+                if($result.tools -and $calls.Length -gt 0){
+                    $last = $global:messageStore[-1];
+                    foreach($call in $calls){
+                        $cmd_args = $call.function.arguments | ConvertFrom-Json;
+                        $global:messageStore[-1] = @{
+                            role=$last.role
+                            content="[Running Command]" + $cmd_args.message
+                            tool_calls = $calls
+                        }
+                        $cmd = $cmd_args.command;
+                        $calls_id = $call.id;
+                        $null = $global:messageStore.Add(@{ role = "tool"; content = "Waiting for run command: `n $cmd"; tool_call_id = "$calls_id"});
+                        Invoke-RenderMessage -message $global:messageStore -start $originY -end $currentY;
+                        $runCheck = Get-InputMsg -tip "Enter Yes or Y to continue run command."
+                        if ($runCheck -match "^(Yes|Y)$") {
+                            Invoke-RenderMessage -message $global:messageStore -start $originY -end $currentY;
+                            $ret = Invoke-Tool -invoke $call -callback $runtoolCallback;
+                            $ret = ($ret|Out-String);
+                            $ret = "Result: $ret";
+                            $global:messageStore[-1].content = $ret;
+                            Invoke-RenderMessage -message $global:messageStore -start $originY -end $currentY;
+                        }else{
+                            $global:messageStore[-1].content += "The user refused to execute the command. Please ask what happened!";
+                        }
+                    }
+                }else{
+                    $inputMsg = Get-InputMsg;
+                    $null = $global:messageStore.Add(@{ role = "user"; content = "$inputMsg" });
+                }
+            }
+
         }
     }
 }
