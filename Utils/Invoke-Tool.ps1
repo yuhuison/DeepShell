@@ -37,7 +37,59 @@ function Invoke-Tool {
                 $ret += $line;
             }
 
+            while ($pythonProcess.StandardError -and !$process.StandardError.EndOfStream) {
+                $line = $process.StandardError.ReadLine();
+                if ($callback) {
+                    & $callback -delta "`n[Error] $line";
+                }
+                $ret += "`n[Error] $line";
+            }
+            
             $process.WaitForExit();
+            return $ret;
+        }
+        "run_python"{
+            $cmd_args = $cmd_args | ConvertFrom-Json;
+            $code = $cmd_args.command;
+            $ret = "Run Python Script`n" + $code + "`nReturn:";
+            if ($callback) {
+                & $callback -delta $ret;
+            }
+
+            $tempFile = [System.IO.Path]::GetTempFileName() + ".py"
+
+            Write-Host $tempFile
+            $ret += "`n Run File $tempFile `n Std Out: `n";
+
+            Set-Content -Path $tempFile -Value $code
+
+            $pythonProcess = New-Object System.Diagnostics.Process;
+            $pythonProcess.StartInfo.FileName = "python";
+            $pythonProcess.StartInfo.Arguments = "`"$tempFile`"";
+            $pythonProcess.StartInfo.RedirectStandardOutput = $true;
+            $pythonProcess.StartInfo.RedirectStandardError = $true;
+            $pythonProcess.StartInfo.UseShellExecute = $false;
+            $pythonProcess.StartInfo.CreateNoWindow = $true;
+            $pythonProcess.Start();
+
+            while (!$pythonProcess.StandardOutput.EndOfStream) {
+                $line = $pythonProcess.StandardOutput.ReadLine();
+                if ($callback) {
+                    & $callback -delta "`n$line";
+                }
+                $ret += "`n$line";
+            }
+
+            while ($pythonProcess.StandardError -and !$pythonProcess.StandardError.EndOfStream) {
+                $line = $pythonProcess.StandardError.ReadLine();
+                if ($callback) {
+                    & $callback -delta "`n[Error] $line";
+                }
+                $ret += "`n[Error] $line";
+            }
+
+            $pythonProcess.WaitForExit();
+            Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue;
             return $ret;
         }
         Default {}

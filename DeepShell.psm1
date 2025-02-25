@@ -71,7 +71,7 @@ function Ds {
 
             $APIKey = "sk-991HER5q9SGxagrZE783E76647C84b6dAbDe3e89A3BcB8Df";
             $APIUri = "https://api.guidaodeng.com/v1/chat/completions";
-            $ModelName = "gpt-4o-mini";
+            $ModelName = "gpt-4o";
 
             $streamCallback = {
                 param (
